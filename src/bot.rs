@@ -96,7 +96,10 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
 
     let manager = songbird::get(ctx).await.unwrap().clone();
 
-    let _handler = manager.join(guild_id, connect_to).await;
+    let (handler, result) = manager.join(guild_id, connect_to).await;
+    if let Err(e) = result {
+        eprintln!("{}", e);
+    }
 
     Ok(())
 }
@@ -146,10 +149,10 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 
     let manager = songbird::get(ctx).await.unwrap().clone();
 
-    let handler_lock = match manager.get(guild_id) {
-        Some(handler) => handler,
-        None => manager.join(guild_id, channel_id).await.0,
-    };
+    let (handler_lock, join_result) = manager.join(guild_id, channel_id).await;
+    if let Err(e) = join_result {
+        eprintln!("{}", e);
+    }
 
     match source.await {
         Ok(source) => {
