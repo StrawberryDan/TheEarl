@@ -1,22 +1,46 @@
 use std::collections::HashSet;
-use std::process::Command;
 
 use serenity::client::{ClientBuilder, Context, EventHandler};
 use serenity::framework::standard::help_commands::plain;
 use serenity::framework::standard::macros::{command, group, help};
 use serenity::framework::standard::{Args, CommandGroup, CommandResult, HelpOptions};
 use serenity::framework::StandardFramework;
-use serenity::futures::TryFutureExt;
-use serenity::model::channel::Message;
+use serenity::model::channel::{ChannelType, Message};
 use serenity::model::id::UserId;
+use serenity::model::prelude::VoiceState;
 use serenity::prelude::GatewayIntents;
-use serenity::{async_trait, Client, Error, FutureExt};
-use songbird::driver::{Bitrate, Driver};
-use songbird::tracks::Queued;
+use serenity::{async_trait, Client, Error};
+use songbird::driver::Bitrate;
 use songbird::SerenityInit;
 
+struct Handler;
+
+#[async_trait]
+impl EventHandler for Handler {
+    async fn voice_state_update(&self, ctx: Context, _: Option<VoiceState>, new: VoiceState) {
+        let channels = new.guild_id.unwrap().channels(&ctx.http).await.unwrap();
+        let channels: Vec<_> = channels
+            .values()
+            .filter(|c| c.kind == ChannelType::Voice)
+            .collect();
+        for channel in channels.into_iter() {
+            let members = channel.members(&ctx.cache).await.unwrap();
+            if members
+                .iter()
+                .any(|u| u.user.id == ctx.cache.current_user().id)
+            {
+                if members.len() == 1 {
+                    let manager = songbird::get(&ctx).await.unwrap();
+
+                    manager.leave(new.guild_id.unwrap()).await.unwrap();
+                }
+            }
+        }
+    }
+}
+
 #[group]
-#[commands(play, join, skip, looping, queue, remove, clear)]
+#[commands(play, join, skip, looping, queue, remove, clear, leave)]
 struct General;
 
 pub struct Bot {
@@ -33,6 +57,7 @@ impl Bot {
 
         let client = ClientBuilder::new(token, intents)
             .framework(framework)
+            .event_handler(Handler)
             .register_songbird()
             .await
             .expect("Failed to create serenity client!");
@@ -69,12 +94,22 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
         }
     };
 
-    let manager = songbird::get(ctx)
-        .await
-        .expect("Songbird Voice client placed in at initialisation.")
-        .clone();
+    let manager = songbird::get(ctx).await.unwrap().clone();
 
     let _handler = manager.join(guild_id, connect_to).await;
+
+    Ok(())
+}
+
+#[command]
+#[only_in(guilds)]
+async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
+    clear(ctx, msg, Args::new("", &[]));
+
+    let guild = msg.guild(&ctx.cache).unwrap().id;
+
+    let manager = songbird::get(&ctx).await.unwrap().clone();
+    manager.leave(guild).await.unwrap();
 
     Ok(())
 }
@@ -84,7 +119,7 @@ async fn join(ctx: &Context, msg: &Message) -> CommandResult {
 async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let url = match args.single::<String>() {
         Ok(url) => url,
-        Err(err) => {
+        Err(_) => {
             msg.channel_id
                 .say(&ctx.http, "You gotta give a me URL!")
                 .await
@@ -131,7 +166,7 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                 .await
                 .unwrap();
         }
-        Err(e) => {
+        Err(_) => {
             status
                 .edit(&ctx.http, |m| m.content(format!("Failed to find song!")))
                 .await
@@ -227,8 +262,7 @@ async fn remove(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 }
 
 #[command]
-#[num_args(0)]
-async fn clear(ctx: &Context, msg: &Message) -> CommandResult {
+async fn clear(ctx: &Context, msg: &Message, mut _args: Args) -> CommandResult {
     let guild = msg.guild(&ctx.cache).unwrap();
     let guild_id = guild.id;
 
@@ -256,7 +290,7 @@ async fn clear(ctx: &Context, msg: &Message) -> CommandResult {
 #[min_args(0)]
 #[max_args(1)]
 async fn looping(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
-    let enable = match (args.len()) {
+    let enable = match args.len() {
         0 => true,
         1 => match args.single::<String>().unwrap().to_lowercase().as_str() {
             "on" => true,
@@ -285,7 +319,7 @@ async fn looping(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult 
     let handler = handler_lock.lock().await;
 
     if let Some(track) = handler.queue().current() {
-        if (enable) {
+        if enable {
             match track.enable_loop() {
                 Ok(()) => msg
                     .channel_id
