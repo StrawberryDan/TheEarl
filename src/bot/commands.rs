@@ -8,6 +8,7 @@ use serenity::model::id::UserId;
 use songbird::driver::Bitrate;
 use songbird::input::Input;
 use songbird::tracks::TrackHandle;
+use songbird::Call;
 
 //==================================================================================================
 //      Commands
@@ -66,10 +67,16 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     let argument = args.rest().to_string();
 
     // Get our track.
-    let track = if is_url(&argument) {
-        songbird::input::Restartable::ytdl(argument, true).await
+    let (print_url, track) = if is_url(&argument) {
+        (
+            false,
+            songbird::input::Restartable::ytdl(argument, true).await,
+        )
     } else {
-        songbird::input::Restartable::ytdl_search(argument, true).await
+        (
+            true,
+            songbird::input::Restartable::ytdl_search(argument, true).await,
+        )
     };
 
     // Get channel that the user is in.
@@ -99,20 +106,10 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         Ok(track) => {
             let mut call = call.lock().await;
             let track: Input = track.into();
-            let track_name = track
-                .metadata
-                .source_url
-                .clone()
-                .unwrap_or("No URL".to_string());
+            let msg = enqueued_msg(&call, &track, print_url);
             call.enqueue_source(track);
             status_message
-                .edit(&ctx.http, |m| {
-                    m.content(format!(
-                        "Enqueued song to position {}\n{}",
-                        call.queue().len(),
-                        track_name
-                    ))
-                })
+                .edit(&ctx.http, |m| m.content(msg))
                 .await
                 .unwrap();
         }
@@ -127,6 +124,22 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     }
 
     return Ok(());
+}
+
+fn enqueued_msg(call: &Call, track: &Input, print_url: bool) -> String {
+    let mut msg = format!("Enqueued song to position {}!", call.queue().len());
+    if print_url {
+        msg = format!(
+            "{}\n{}",
+            msg,
+            track
+                .metadata
+                .source_url
+                .clone()
+                .unwrap_or("No URL".to_string())
+        );
+    }
+    return msg;
 }
 
 fn is_url(string: &str) -> bool {
