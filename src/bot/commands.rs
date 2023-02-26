@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::time::Duration;
 
 use serenity::client::Context;
 use serenity::framework::standard::macros::{command, group, help};
@@ -7,14 +8,14 @@ use serenity::model::channel::Message;
 use serenity::model::id::UserId;
 use songbird::driver::Bitrate;
 use songbird::input::Input;
-use songbird::tracks::TrackHandle;
+use songbird::tracks::{LoopState, TrackHandle};
 use songbird::Call;
 
 //==================================================================================================
 //      Commands
 //--------------------------------------------------------------------------------------------------
 #[group]
-#[commands(play, join, looping, skip, queue, remove, clear, leave)]
+#[commands(play, join, looping, skip, queue, remove, clear, leave, now_playing)]
 struct Commands;
 
 #[command]
@@ -127,7 +128,7 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
 }
 
 fn enqueued_msg(call: &Call, track: &Input, print_url: bool) -> String {
-    let mut msg = format!("Enqueued song to position {}!", call.queue().len());
+    let mut msg = format!("Enqueued song to position {}!", call.queue().len() + 1);
     if print_url {
         msg = format!(
             "{}\n{}",
@@ -297,6 +298,32 @@ async fn clear(ctx: &Context, msg: &Message, mut _args: Args) -> CommandResult {
     Ok(())
 }
 
+#[command]
+#[only_in(guilds)]
+#[aliases("np")]
+async fn now_playing(ctx: &Context, msg: &Message) -> CommandResult {
+    let songbird = songbird::get(ctx).await.unwrap().clone();
+    let guild = msg.guild_id.unwrap();
+    let call = songbird.get_or_insert(guild);
+    let call = call.lock().await;
+
+    if let Some(track) = call.queue().current() {
+        let track_name = track.metadata().title.clone().unwrap_or("No Title".to_string());
+        let position = format_duration(track.get_info().await.unwrap().position);
+        let duration = format_duration(track.metadata().duration.unwrap_or(Duration::from_secs(0)));
+        let looping = match track.get_info().await.unwrap().loops {
+            LoopState::Infinite => "[LOOPING]".to_string(),
+            LoopState::Finite(_) => String::new(),
+        };
+
+        msg.channel_id.say(&ctx.http, format!("{}    ({}/{})    {}", track_name, position, duration, looping)).await.unwrap();
+    } else {
+        msg.channel_id.say(&ctx.http, "No track currently playing").await.unwrap();
+    }
+
+    Ok(())
+}
+
 #[help]
 async fn my_help(
     ctx: &Context,
@@ -316,4 +343,9 @@ async fn my_help(
     )
     .await;
     Ok(())
+}
+
+
+fn format_duration(duration: Duration) -> String {
+    format!("{:02}:{:02}", duration.as_secs() / 60, duration.as_secs() % 60)
 }
