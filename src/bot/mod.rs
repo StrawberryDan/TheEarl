@@ -48,7 +48,7 @@ pub struct Bot {
 impl Bot {
     pub async fn new(token: &str, intents: GatewayIntents) -> Self {
         let framework = StandardFramework::new()
-            .configure(|c| c.prefix("~"))
+            .configure(|c| c.prefix("|"))
             .group(&commands::COMMANDS_GROUP)
             .help(&commands::MY_HELP);
 

@@ -6,13 +6,14 @@ use serenity::framework::standard::{Args, CommandGroup, CommandResult};
 use serenity::model::channel::Message;
 use serenity::model::id::UserId;
 use songbird::driver::Bitrate;
+use songbird::input::Input;
 use songbird::tracks::TrackHandle;
 
 //==================================================================================================
 //      Commands
 //--------------------------------------------------------------------------------------------------
 #[group]
-#[commands(play, join, skip, queue, remove, clear, leave)]
+#[commands(play, join, looping, skip, queue, remove, clear, leave)]
 struct Commands;
 
 #[command]
@@ -54,7 +55,7 @@ async fn leave(ctx: &Context, msg: &Message) -> CommandResult {
 
 #[command]
 #[only_in(guilds)]
-async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     // Say that we are searching.
     let mut status_message = msg
         .channel_id
@@ -62,16 +63,13 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         .await
         .unwrap();
 
+    let argument = args.rest().to_string();
+
     // Get our track.
-    let track = match args.single::<String>() {
-        Ok(url) => songbird::ytdl(&url).await,
-        Err(e) => {
-            msg.channel_id
-                .say(&ctx.http, "You gotta give a me URL!")
-                .await
-                .expect(&format!("Failed to send message! {}", e));
-            return Ok(());
-        }
+    let track = if is_url(&argument) {
+        songbird::input::Restartable::ytdl(argument, true).await
+    } else {
+        songbird::input::Restartable::ytdl_search(argument, true).await
     };
 
     // Get channel that the user is in.
@@ -100,10 +98,20 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     match track {
         Ok(track) => {
             let mut call = call.lock().await;
+            let track: Input = track.into();
+            let track_name = track
+                .metadata
+                .source_url
+                .clone()
+                .unwrap_or("No URL".to_string());
             call.enqueue_source(track);
             status_message
                 .edit(&ctx.http, |m| {
-                    m.content(format!("Enqueued song to position {}", call.queue().len()))
+                    m.content(format!(
+                        "Enqueued song to position {}\n{}",
+                        call.queue().len(),
+                        track_name
+                    ))
                 })
                 .await
                 .unwrap();
@@ -119,6 +127,66 @@ async fn play(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     }
 
     return Ok(());
+}
+
+fn is_url(string: &str) -> bool {
+    string.starts_with("http://") || string.starts_with("https://")
+}
+
+#[command]
+#[only_in(guilds)]
+#[aliases("loop")]
+#[min_args(0)]
+#[max_args(1)]
+async fn looping(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let enable = match args.len() {
+        0 => true,
+        1 => match args.single::<String>().unwrap().to_lowercase().as_str() {
+            "on" => true,
+            "off" => false,
+            _ => return Ok(()),
+        },
+        _ => unreachable!(),
+    };
+
+    let guild = msg.guild(&ctx.cache).unwrap();
+
+    let songbird = songbird::get(ctx).await.unwrap().clone();
+
+    let call = songbird.get_or_insert(guild.id);
+    let call = call.lock().await;
+
+    if let Some(track) = call.queue().current() {
+        if enable {
+            match track.enable_loop() {
+                Ok(()) => msg
+                    .channel_id
+                    .say(&ctx.http, "Enabled Looping.")
+                    .await
+                    .unwrap(),
+                Err(_) => msg
+                    .channel_id
+                    .say(&ctx.http, "Failed to enable looping.")
+                    .await
+                    .unwrap(),
+            };
+        } else {
+            match track.disable_loop() {
+                Ok(()) => msg
+                    .channel_id
+                    .say(&ctx.http, "Disabled Looping.")
+                    .await
+                    .unwrap(),
+                Err(_) => msg
+                    .channel_id
+                    .say(&ctx.http, "Failed to disable looping.")
+                    .await
+                    .unwrap(),
+            };
+        }
+    }
+
+    Ok(())
 }
 
 #[command]

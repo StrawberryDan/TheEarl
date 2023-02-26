@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "*", features = ["full"] }
+lazy_static = "*"
 
 [dependencies.songbird]
 version = "0.3.0"
