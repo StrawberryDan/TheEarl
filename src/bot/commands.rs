@@ -98,6 +98,12 @@ async fn play(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
         // Failed to join.
         (_, Err(e)) => {
             eprintln!("Could not join call! {}", e);
+            status_message
+                .edit(&ctx.http, |m| {
+                    m.content("Sorry. Something went very wrong :3")
+                })
+                .await
+                .unwrap();
             return Ok(());
         }
     };
@@ -308,7 +314,11 @@ async fn now_playing(ctx: &Context, msg: &Message) -> CommandResult {
     let call = call.lock().await;
 
     if let Some(track) = call.queue().current() {
-        let track_name = track.metadata().title.clone().unwrap_or("No Title".to_string());
+        let track_name = track
+            .metadata()
+            .title
+            .clone()
+            .unwrap_or("No Title".to_string());
         let position = format_duration(track.get_info().await.unwrap().position);
         let duration = format_duration(track.metadata().duration.unwrap_or(Duration::from_secs(0)));
         let looping = match track.get_info().await.unwrap().loops {
@@ -316,9 +326,21 @@ async fn now_playing(ctx: &Context, msg: &Message) -> CommandResult {
             LoopState::Finite(_) => String::new(),
         };
 
-        msg.channel_id.say(&ctx.http, format!("{}    ({}/{})    {}", track_name, position, duration, looping)).await.unwrap();
+        msg.channel_id
+            .say(
+                &ctx.http,
+                format!(
+                    "{}    ({}/{})    {}",
+                    track_name, position, duration, looping
+                ),
+            )
+            .await
+            .unwrap();
     } else {
-        msg.channel_id.say(&ctx.http, "No track currently playing").await.unwrap();
+        msg.channel_id
+            .say(&ctx.http, "No track currently playing")
+            .await
+            .unwrap();
     }
 
     Ok(())
@@ -345,7 +367,10 @@ async fn my_help(
     Ok(())
 }
 
-
 fn format_duration(duration: Duration) -> String {
-    format!("{:02}:{:02}", duration.as_secs() / 60, duration.as_secs() % 60)
+    format!(
+        "{:02}:{:02}",
+        duration.as_secs() / 60,
+        duration.as_secs() % 60
+    )
 }
