@@ -10,10 +10,10 @@ tokio = { version = "*", features = ["full"] }
 lazy_static = "*"
 
 [dependencies.songbird]
-version = "0.3.0"
+version = "*"
 features = ["builtin-queue"]
 
 [dependencies.serenity]
-version = "0.11"
+version = "*"
 default-features = false
 features = ["client", "gateway", "model", "rustls_backend", "standard_framework", "cache"]
